@@ -48,6 +48,10 @@ use paint::{self, PaintCtx};
 use util::{OPTIONAL_FUNCTIONS, ToWide};
 use win_main::RunLoopHandle;
 
+extern "system" {
+    pub fn DwmFlush();
+}
+
 /// Builder abstraction for creating new windows.
 pub struct WindowBuilder {
     handler: Option<Box<WinHandler>>,
@@ -128,6 +132,23 @@ impl MyWndProc {
                 paint::create_render_target_dxgi(&self.d2d_factory, self.swap_chain.get()).ok();
         }
     }
+
+    // Renders but does not present.
+    fn render(&self) {
+        let mut tmp = self.render_target.borrow_mut();
+        let rt = tmp.as_mut().unwrap();
+        rt.begin_draw();
+        let anim = self.handler.paint(&mut PaintCtx {
+            d2d_factory: &self.d2d_factory,
+            render_target: rt,
+        });
+        // Maybe should deal with lost device here...
+        let _ = rt.end_draw();
+        if anim {
+            let handle = self.handle.borrow().clone();
+            self.runloop.borrow().add_idle(move || handle.invalidate());
+        }
+    }
 }
 
 impl WndProc for MyWndProc {
@@ -147,20 +168,9 @@ impl WndProc for MyWndProc {
                     let rt = paint::create_render_target(&self.d2d_factory, hwnd);
                     *self.render_target.borrow_mut() = rt.ok();
                 }
-                let mut tmp = self.render_target.borrow_mut();
-                let rt = tmp.as_mut().unwrap();
-                rt.begin_draw();
-                let anim = self.handler.paint(&mut PaintCtx {
-                    d2d_factory: &self.d2d_factory,
-                    render_target: rt,
-                });
-                let _ = rt.end_draw();
+                self.render();
                 (*self.swap_chain.get()).Present(1, 0);
                 ValidateRect(hwnd, null_mut());
-                if anim {
-                    let handle = self.handle.borrow().clone();
-                    self.runloop.borrow().add_idle(move || handle.invalidate());
-                }
                 Some(0)
             },
             WM_SIZE => unsafe {
@@ -168,10 +178,10 @@ impl WndProc for MyWndProc {
                 let res = (*self.swap_chain.get()).ResizeBuffers(0, 0, 0, DXGI_FORMAT_UNKNOWN, 0);
                 if SUCCEEDED(res) {
                     self.rebuild_render_target();
-                    //state.render(true);
-                    //(*state.swap_chain).Present(0, 0);
-                    InvalidateRect(hwnd, null_mut(), FALSE);
-                    //ValidateRect(hwnd, null_mut());
+                    self.render();
+                    (*self.swap_chain.get()).Present(0, 0);
+                    DwmFlush();
+                    ValidateRect(hwnd, null_mut());
                 } else {
                     println!("ResizeBuffers failed: 0x{:x}", res);
                 }
