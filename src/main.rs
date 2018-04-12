@@ -256,6 +256,11 @@ impl WinHandler for MainWinHandler {
         false
     }
 
+    fn rebuild_resources(&self) {
+        let mut state = self.win.state.borrow_mut();
+        state.resources = None;
+    }
+
     fn command(&self, id: u32) {
         match id {
             x if x == MenuEntries::Exit as u32 => {
